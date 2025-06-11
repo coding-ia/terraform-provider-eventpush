@@ -10,10 +10,6 @@ func TestAccEventPushSQSSendMessage_Simple(t *testing.T) {
 resource "eventpush_aws_sqs_send_message" "test" {
   message_body = "test message 2"
   queue_url    = "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"
-
-  kms_signature {
-    kms_key_id = "arn:aws:kms:us-east-2:242306084486:key/9834cc70-67b2-446b-b921-34feb2c33406"
-  }
 }
 `
 
@@ -21,11 +17,6 @@ resource "eventpush_aws_sqs_send_message" "test" {
 resource "eventpush_aws_sqs_send_message" "test" {
   message_body = "test message 2"
   queue_url    = "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"
-
-  kms_signature {
-    kms_key_id = "arn:aws:kms:us-east-2:242306084486:key/9834cc70-67b2-446b-b921-34feb2c33406"
-    message_attribute = "signature"
-  }
 }
 `
 	resource.Test(t, resource.TestCase{
