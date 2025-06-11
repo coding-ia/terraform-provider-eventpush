@@ -33,17 +33,7 @@ func (e *EventPushProvider) Metadata(ctx context.Context, request provider.Metad
 
 func (e *EventPushProvider) Schema(ctx context.Context, request provider.SchemaRequest, response *provider.SchemaResponse) {
 	response.Schema = schema.Schema{
-		MarkdownDescription: "The automation Terraform provider contains various resources used to assist in automation.",
-		Attributes: map[string]schema.Attribute{
-			"profile": schema.StringAttribute{
-				Description: "The profile for API operations. If not set, the default profile for aws configuration will be used.",
-				Optional:    true,
-			},
-			"region": schema.StringAttribute{
-				Description: "The region in AWS where actions will take place.",
-				Optional:    true,
-			},
-		},
+		MarkdownDescription: "The Event Push provider contains resource used to send messages to various services.",
 	}
 }
 
@@ -81,8 +71,6 @@ func signMessageBodyWithKMS(ctx context.Context, kmsClient *kms.Client, algorith
 	if err != nil {
 		return "", fmt.Errorf("failed to sign message: %w", err)
 	}
-
-	// SigningAlgorithmSpecRsassaPkcs1V15Sha256
 
 	return base64.StdEncoding.EncodeToString(output.Signature), nil
 }
