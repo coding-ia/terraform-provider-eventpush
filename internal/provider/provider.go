@@ -2,6 +2,13 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -12,6 +19,11 @@ var _ provider.Provider = &EventPushProvider{}
 
 type EventPushProvider struct {
 	version string
+}
+
+type Meta struct {
+	SQSClient *sqs.Client
+	KMSClient *kms.Client
 }
 
 func (e *EventPushProvider) Metadata(ctx context.Context, request provider.MetadataRequest, response *provider.MetadataResponse) {
@@ -55,4 +67,22 @@ func New(version string) func() provider.Provider {
 			version: version,
 		}
 	}
+}
+
+func signMessageBodyWithKMS(ctx context.Context, kmsClient *kms.Client, keyID, message string) (string, error) {
+	digest := sha256.Sum256([]byte(message))
+
+	output, err := kmsClient.Sign(ctx, &kms.SignInput{
+		KeyId:            aws.String(keyID),
+		Message:          digest[:],
+		MessageType:      kmstypes.MessageTypeDigest,
+		SigningAlgorithm: kmstypes.SigningAlgorithmSpecRsassaPssSha256,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to sign message: %w", err)
+	}
+
+	// SigningAlgorithmSpecRsassaPkcs1V15Sha256
+
+	return base64.StdEncoding.EncodeToString(output.Signature), nil
 }

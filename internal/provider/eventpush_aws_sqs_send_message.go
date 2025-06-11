@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
@@ -21,7 +23,7 @@ var _ resource.Resource = &AWSSQSSendMessageResource{}
 var _ resource.ResourceWithConfigure = &AWSSQSSendMessageResource{}
 
 type AWSSQSSendMessageResource struct {
-	sqsClient *sqs.Client
+	meta *Meta
 }
 
 type AWSSQSSendMessageResourceModel struct {
@@ -50,7 +52,13 @@ func (r *AWSSQSSendMessageResource) Configure(ctx context.Context, request resou
 		return
 	}
 
-	r.sqsClient = sqs.NewFromConfig(cfg)
+	sqsClient := sqs.NewFromConfig(cfg)
+	kmsClient := kms.NewFromConfig(cfg)
+
+	r.meta = &Meta{
+		SQSClient: sqsClient,
+		KMSClient: kmsClient,
+	}
 }
 
 func (r *AWSSQSSendMessageResource) Metadata(ctx context.Context, request resource.MetadataRequest, response *resource.MetadataResponse) {
@@ -117,7 +125,7 @@ func (r *AWSSQSSendMessageResource) Create(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.sqsClient, &data, "create")
+	err := sendMessage(ctx, r.meta, &data, "create")
 	if err != nil {
 		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 		return
@@ -155,7 +163,7 @@ func (r *AWSSQSSendMessageResource) Update(ctx context.Context, request resource
 	stateMessageBodyMD5 := createMD5OfMessageBody(state.MessageBody.ValueString())
 
 	if planMessageBodyMD5 != stateMessageBodyMD5 {
-		err := sendMessage(ctx, r.sqsClient, &plan, "update")
+		err := sendMessage(ctx, r.meta, &plan, "update")
 		if err != nil {
 			response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 			return
@@ -179,7 +187,7 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
 
-func sendMessage(ctx context.Context, client *sqs.Client, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
+func sendMessage(ctx context.Context, meta *Meta, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
 	messageAttributes := make(map[string]sqstypes.MessageAttributeValue)
 	input := &sqs.SendMessageInput{
 		QueueUrl:    aws.String(data.QueueUrl.ValueString()),
@@ -191,13 +199,23 @@ func sendMessage(ctx context.Context, client *sqs.Client, data *AWSSQSSendMessag
 	}
 
 	if data.KMSSignature != nil {
+		if data.KMSSignature.KMSKeyID.IsNull() || data.KMSSignature.KMSKeyID.IsUnknown() {
+			return errors.New("no KMS Key ID is configured")
+		}
+
 		attrName := "X-KMS-Signature"
 		if !data.KMSSignature.MessageAttribute.IsNull() {
 			attrName = data.KMSSignature.MessageAttribute.String()
 		}
+
+		signature, err := signMessageBodyWithKMS(ctx, meta.KMSClient, data.KMSSignature.KMSKeyID.ValueString(), data.MessageBody.ValueString())
+		if err != nil {
+			return err
+		}
+
 		messageAttributes[attrName] = sqstypes.MessageAttributeValue{
 			DataType:    aws.String("String"),
-			StringValue: aws.String("abc123"),
+			StringValue: aws.String(signature),
 		}
 	}
 
@@ -207,7 +225,7 @@ func sendMessage(ctx context.Context, client *sqs.Client, data *AWSSQSSendMessag
 	}
 
 	input.MessageAttributes = messageAttributes
-	output, err := client.SendMessage(ctx, input)
+	output, err := meta.SQSClient.SendMessage(ctx, input)
 
 	if err != nil {
 		return err
