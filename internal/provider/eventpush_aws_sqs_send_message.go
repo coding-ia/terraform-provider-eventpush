@@ -26,7 +26,7 @@ var _ resource.Resource = &AWSSQSSendMessageResource{}
 var _ resource.ResourceWithConfigure = &AWSSQSSendMessageResource{}
 
 type AWSSQSSendMessageResource struct {
-	meta *Meta
+	AWSClient *AWSClient
 }
 
 type AWSSQSSendMessageResourceModel struct {
@@ -50,18 +50,29 @@ func newAWSSQSSendMessageResource() resource.Resource {
 }
 
 func (r *AWSSQSSendMessageResource) Configure(ctx context.Context, request resource.ConfigureRequest, response *resource.ConfigureResponse) {
+	if request.ProviderData == nil {
+		return
+	}
+
+	providerMeta := request.ProviderData.(Meta)
+
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		response.Diagnostics.AddError("unable to load SDK config", err.Error())
 		return
 	}
 
+	if providerMeta.AWSConfigOptions.Region != "" {
+		cfg.Region = providerMeta.AWSConfigOptions.Region
+	}
+
 	sqsClient := sqs.NewFromConfig(cfg)
 	kmsClient := kms.NewFromConfig(cfg)
 
-	r.meta = &Meta{
+	r.AWSClient = &AWSClient{
 		SQSClient: sqsClient,
 		KMSClient: kmsClient,
+		Region:    providerMeta.AWSConfigOptions.Region,
 	}
 }
 
@@ -146,7 +157,7 @@ func (r *AWSSQSSendMessageResource) Create(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.meta, &data, "create")
+	err := sendMessage(ctx, r.AWSClient, &data, "create")
 	if err != nil {
 		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 		return
@@ -184,7 +195,7 @@ func (r *AWSSQSSendMessageResource) Update(ctx context.Context, request resource
 	stateMessageBodyMD5 := createMD5OfMessageBody(state.MessageBody.ValueString())
 
 	if planMessageBodyMD5 != stateMessageBodyMD5 {
-		err := sendMessage(ctx, r.meta, &plan, "update")
+		err := sendMessage(ctx, r.AWSClient, &plan, "update")
 		if err != nil {
 			response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 			return
@@ -205,7 +216,7 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.meta, &data, "delete")
+	err := sendMessage(ctx, r.AWSClient, &data, "delete")
 	if err != nil {
 		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 		return
@@ -214,7 +225,7 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
 
-func sendMessage(ctx context.Context, meta *Meta, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
+func sendMessage(ctx context.Context, meta *AWSClient, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
 	messageAttributes := make(map[string]sqstypes.MessageAttributeValue)
 	input := &sqs.SendMessageInput{
 		QueueUrl:    aws.String(data.QueueUrl.ValueString()),
