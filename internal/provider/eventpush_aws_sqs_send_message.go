@@ -204,6 +204,12 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 		return
 	}
 
+	err := sendMessage(ctx, r.meta, &data, "delete")
+	if err != nil {
+		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+		return
+	}
+
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
 
@@ -260,7 +266,7 @@ func sendMessage(ctx context.Context, meta *Meta, data *AWSSQSSendMessageResourc
 }
 
 func createMD5OfMessageBody(input string) string {
-	hash := md5.Sum([]byte(input)) // returns [16]byte
+	hash := md5.Sum([]byte(input))
 	hashString := hex.EncodeToString(hash[:])
 	return hashString
 }

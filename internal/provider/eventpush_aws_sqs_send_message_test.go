@@ -50,3 +50,31 @@ resource "eventpush_aws_sqs_send_message" "test" {
 		},
 	})
 }
+
+func TestAccEventPushSQSSendMessage_Delete(t *testing.T) {
+	config1 := `
+resource "eventpush_aws_sqs_send_message" "test" {
+  message_body = "test message 2"
+  queue_url    = "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"
+}
+`
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() {},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config1,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("eventpush_aws_sqs_send_message.test", "queue_url", "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"),
+				),
+			},
+			{
+				RefreshState: true,
+			},
+			{
+				Config:  config1,
+				Destroy: true,
+			},
+		},
+	})
+}
