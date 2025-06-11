@@ -74,7 +74,8 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 		MarkdownDescription: "Send a message to an AWS SQS Queue.",
 		Attributes: map[string]schema.Attribute{
 			"create_only": schema.BoolAttribute{
-				Optional: true,
+				Description: "When enabled, forces resource to be replaced on update.",
+				Optional:    true,
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplaceIfConfigured(),
 				},
@@ -84,7 +85,7 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 				Optional:    true,
 			},
 			"event_id": schema.StringAttribute{
-				Description: "Generate ID for resource tracking.",
+				Description: "Generated ID for resource tracking.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
