@@ -2,11 +2,16 @@ package provider
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -20,11 +25,13 @@ type AWSSQSSendMessageResource struct {
 }
 
 type AWSSQSSendMessageResourceModel struct {
-	DelaySeconds types.Int32                 `tfsdk:"delay_seconds"`
-	KMSSignature *KMSSignatureAttributeModel `tfsdk:"kms_signature"`
-	MessageBody  types.String                `tfsdk:"message_body"`
-	MessageId    types.String                `tfsdk:"message_id"`
-	QueueUrl     types.String                `tfsdk:"queue_url"`
+	CreateOnly       types.Bool                  `tfsdk:"create_only"`
+	DelaySeconds     types.Int32                 `tfsdk:"delay_seconds"`
+	EventId          types.String                `tfsdk:"event_id"`
+	KMSSignature     *KMSSignatureAttributeModel `tfsdk:"kms_signature"`
+	MD5OfMessageBody types.String                `tfsdk:"md5_of_message_body"`
+	MessageBody      types.String                `tfsdk:"message_body"`
+	QueueUrl         types.String                `tfsdk:"queue_url"`
 }
 
 type KMSSignatureAttributeModel struct {
@@ -54,30 +61,34 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 	response.Schema = schema.Schema{
 		MarkdownDescription: "Send a message to an AWS SQS Queue.",
 		Attributes: map[string]schema.Attribute{
+			"create_only": schema.BoolAttribute{
+				Optional: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplaceIfConfigured(),
+				},
+			},
 			"delay_seconds": schema.Int32Attribute{
 				Description: "The length of time, in seconds, for which to delay a specific message.",
 				Optional:    true,
 			},
-			"message_body": schema.StringAttribute{
-				Description: "The message to send.",
-				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"message_id": schema.StringAttribute{
-				Description: "Message ID return by the queue.",
+			"event_id": schema.StringAttribute{
+				Description: "Generate ID for resource tracking.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"md5_of_message_body": schema.StringAttribute{
+				Description: "The MD5 of the message body.",
+				Computed:    true,
+			},
+			"message_body": schema.StringAttribute{
+				Description: "The message to send.",
+				Required:    true,
+			},
 			"queue_url": schema.StringAttribute{
 				Description: "The URL of the Amazon SQS queue which a message is sent.",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -106,23 +117,14 @@ func (r *AWSSQSSendMessageResource) Create(ctx context.Context, request resource
 		return
 	}
 
-	input := &sqs.SendMessageInput{
-		QueueUrl:    aws.String(data.QueueUrl.ValueString()),
-		MessageBody: aws.String(data.MessageBody.ValueString()),
-	}
-
-	if !data.DelaySeconds.IsNull() {
-		input.DelaySeconds = data.DelaySeconds.ValueInt32()
-	}
-
-	output, err := r.sqsClient.SendMessage(ctx, input)
-
+	err := sendMessage(ctx, r.sqsClient, &data, "create")
 	if err != nil {
 		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
 		return
 	}
 
-	data.MessageId = types.StringPointerValue(output.MessageId)
+	// Set event ID only in creation lifecycle
+	data.EventId = types.StringValue(uuid.New().String())
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
@@ -140,7 +142,29 @@ func (r *AWSSQSSendMessageResource) Read(ctx context.Context, request resource.R
 }
 
 func (r *AWSSQSSendMessageResource) Update(ctx context.Context, request resource.UpdateRequest, response *resource.UpdateResponse) {
+	var plan, state AWSSQSSendMessageResourceModel
 
+	response.Diagnostics.Append(request.Plan.Get(ctx, &plan)...)
+	response.Diagnostics.Append(request.State.Get(ctx, &state)...)
+
+	if response.Diagnostics.HasError() {
+		return
+	}
+
+	planMessageBodyMD5 := createMD5OfMessageBody(plan.MessageBody.ValueString())
+	stateMessageBodyMD5 := createMD5OfMessageBody(state.MessageBody.ValueString())
+
+	if planMessageBodyMD5 != stateMessageBodyMD5 {
+		err := sendMessage(ctx, r.sqsClient, &plan, "update")
+		if err != nil {
+			response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+			return
+		}
+	} else {
+		plan.MD5OfMessageBody = types.StringValue(planMessageBodyMD5)
+	}
+
+	response.Diagnostics.Append(response.State.Set(ctx, &plan)...)
 }
 
 func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
@@ -153,4 +177,49 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 	}
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
+}
+
+func sendMessage(ctx context.Context, client *sqs.Client, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
+	messageAttributes := make(map[string]sqstypes.MessageAttributeValue)
+	input := &sqs.SendMessageInput{
+		QueueUrl:    aws.String(data.QueueUrl.ValueString()),
+		MessageBody: aws.String(data.MessageBody.ValueString()),
+	}
+
+	if !data.DelaySeconds.IsNull() {
+		input.DelaySeconds = data.DelaySeconds.ValueInt32()
+	}
+
+	if data.KMSSignature != nil {
+		attrName := "X-KMS-Signature"
+		if !data.KMSSignature.MessageAttribute.IsNull() {
+			attrName = data.KMSSignature.MessageAttribute.String()
+		}
+		messageAttributes[attrName] = sqstypes.MessageAttributeValue{
+			DataType:    aws.String("String"),
+			StringValue: aws.String("abc123"),
+		}
+	}
+
+	messageAttributes["X-LifeCycle-Hook"] = sqstypes.MessageAttributeValue{
+		DataType:    aws.String("String"),
+		StringValue: aws.String(lifeCycle),
+	}
+
+	input.MessageAttributes = messageAttributes
+	output, err := client.SendMessage(ctx, input)
+
+	if err != nil {
+		return err
+	}
+
+	data.MD5OfMessageBody = types.StringPointerValue(output.MD5OfMessageBody)
+
+	return nil
+}
+
+func createMD5OfMessageBody(input string) string {
+	hash := md5.Sum([]byte(input)) // returns [16]byte
+	hashString := hex.EncodeToString(hash[:])
+	return hashString
 }

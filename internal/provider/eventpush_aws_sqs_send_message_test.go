@@ -8,7 +8,7 @@ import (
 func TestAccEventPushSQSSendMessage_Simple(t *testing.T) {
 	config1 := `
 resource "eventpush_aws_sqs_send_message" "test" {
-  message_body = "test message 1"
+  message_body = "test message 2"
   queue_url    = "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"
 
   kms_signature {
@@ -19,8 +19,12 @@ resource "eventpush_aws_sqs_send_message" "test" {
 
 	config2 := `
 resource "eventpush_aws_sqs_send_message" "test" {
-  message_body = "test message 2"
+  message_body = "test message 1"
   queue_url    = "https://sqs.us-east-2.amazonaws.com/242306084486/TestQueue"
+
+  kms_signature {
+    kms_key_id = "test-key"
+  }
 }
 `
 	resource.Test(t, resource.TestCase{
