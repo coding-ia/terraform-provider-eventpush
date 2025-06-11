@@ -69,14 +69,14 @@ func New(version string) func() provider.Provider {
 	}
 }
 
-func signMessageBodyWithKMS(ctx context.Context, kmsClient *kms.Client, keyID, message string) (string, error) {
+func signMessageBodyWithKMS(ctx context.Context, kmsClient *kms.Client, algorithm, keyID, message string) (string, error) {
 	digest := sha256.Sum256([]byte(message))
 
 	output, err := kmsClient.Sign(ctx, &kms.SignInput{
 		KeyId:            aws.String(keyID),
 		Message:          digest[:],
 		MessageType:      kmstypes.MessageTypeDigest,
-		SigningAlgorithm: kmstypes.SigningAlgorithmSpecRsassaPssSha256,
+		SigningAlgorithm: kmstypes.SigningAlgorithmSpec(algorithm),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to sign message: %w", err)

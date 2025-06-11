@@ -4,18 +4,21 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -27,18 +30,19 @@ type AWSSQSSendMessageResource struct {
 }
 
 type AWSSQSSendMessageResourceModel struct {
-	CreateOnly       types.Bool                  `tfsdk:"create_only"`
-	DelaySeconds     types.Int32                 `tfsdk:"delay_seconds"`
-	EventId          types.String                `tfsdk:"event_id"`
-	KMSSignature     *KMSSignatureAttributeModel `tfsdk:"kms_signature"`
-	MD5OfMessageBody types.String                `tfsdk:"md5_of_message_body"`
-	MessageBody      types.String                `tfsdk:"message_body"`
-	QueueUrl         types.String                `tfsdk:"queue_url"`
+	CreateOnly       types.Bool                   `tfsdk:"create_only"`
+	DelaySeconds     types.Int32                  `tfsdk:"delay_seconds"`
+	EventId          types.String                 `tfsdk:"event_id"`
+	KMSSignature     []KMSSignatureAttributeModel `tfsdk:"kms_signature"`
+	MD5OfMessageBody types.String                 `tfsdk:"md5_of_message_body"`
+	MessageBody      types.String                 `tfsdk:"message_body"`
+	QueueUrl         types.String                 `tfsdk:"queue_url"`
 }
 
 type KMSSignatureAttributeModel struct {
 	KMSKeyID         types.String `tfsdk:"kms_key_id"`
 	MessageAttribute types.String `tfsdk:"message_attribute"`
+	Algorithm        types.String `tfsdk:"algorithm"`
 }
 
 func newAWSSQSSendMessageResource() resource.Resource {
@@ -100,16 +104,32 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 			},
 		},
 		Blocks: map[string]schema.Block{
-			"kms_signature": schema.SingleNestedBlock{
-				Attributes: map[string]schema.Attribute{
-					"kms_key_id": schema.StringAttribute{
-						Description: "The ID of the AWS KMS key.",
-						Optional:    true,
+			"kms_signature": schema.ListNestedBlock{
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"kms_key_id": schema.StringAttribute{
+							Description: "The ID of the AWS KMS key.",
+							Required:    true,
+						},
+						"message_attribute": schema.StringAttribute{
+							Description: "Message attribute name to add signature value.",
+							Optional:    true,
+						},
+						"algorithm": schema.StringAttribute{
+							Description: "The KMS signature algorithm.",
+							Optional:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOfCaseInsensitive(
+									[]string{
+										string(kmstypes.SigningAlgorithmSpecRsassaPkcs1V15Sha256),
+									}...,
+								),
+							},
+						},
 					},
-					"message_attribute": schema.StringAttribute{
-						Description: "Message attribute name to add signature value.",
-						Optional:    true,
-					},
+				},
+				Validators: []validator.List{
+					listvalidator.SizeAtMost(1),
 				},
 			},
 		},
@@ -199,16 +219,19 @@ func sendMessage(ctx context.Context, meta *Meta, data *AWSSQSSendMessageResourc
 	}
 
 	if data.KMSSignature != nil {
-		if data.KMSSignature.KMSKeyID.IsNull() || data.KMSSignature.KMSKeyID.IsUnknown() {
-			return errors.New("no KMS Key ID is configured")
-		}
+		kmsBlock := data.KMSSignature[0]
 
 		attrName := "X-KMS-Signature"
-		if !data.KMSSignature.MessageAttribute.IsNull() {
-			attrName = data.KMSSignature.MessageAttribute.String()
+		if !kmsBlock.MessageAttribute.IsNull() {
+			attrName = kmsBlock.MessageAttribute.String()
 		}
 
-		signature, err := signMessageBodyWithKMS(ctx, meta.KMSClient, data.KMSSignature.KMSKeyID.ValueString(), data.MessageBody.ValueString())
+		algorithm := "RSASSA_PKCS1_V1_5_SHA_256"
+		if !kmsBlock.Algorithm.IsNull() {
+			algorithm = kmsBlock.Algorithm.String()
+		}
+
+		signature, err := signMessageBodyWithKMS(ctx, meta.KMSClient, algorithm, kmsBlock.KMSKeyID.ValueString(), data.MessageBody.ValueString())
 		if err != nil {
 			return err
 		}
