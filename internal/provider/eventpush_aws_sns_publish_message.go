@@ -93,7 +93,7 @@ func (r *AWSSNSPublishMessageResource) Schema(ctx context.Context, request resou
 				Description: "The message to send.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIf(replaceSNSIfCreateOnlySet, "", ""),
+					stringplanmodifier.RequiresReplaceIf(replaceSNSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
 				},
 			},
 			"topic_arn": schema.StringAttribute{

@@ -106,7 +106,7 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 				Description: "The message to send.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIf(replaceSQSIfCreateOnlySet, "", ""),
+					stringplanmodifier.RequiresReplaceIf(replaceSQSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
 				},
 			},
 			"queue_url": schema.StringAttribute{
