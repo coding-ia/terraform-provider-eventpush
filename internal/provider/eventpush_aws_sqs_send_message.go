@@ -215,10 +215,12 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.AWSClient, &data, "delete")
-	if err != nil {
-		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
-		return
+	if !data.CreateOnly.ValueBool() {
+		err := sendMessage(ctx, r.AWSClient, &data, "delete")
+		if err != nil {
+			response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+			return
+		}
 	}
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
