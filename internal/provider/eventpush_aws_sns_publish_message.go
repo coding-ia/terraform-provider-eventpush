@@ -202,10 +202,12 @@ func (r *AWSSNSPublishMessageResource) Delete(ctx context.Context, request resou
 		return
 	}
 
-	err := publishMessage(ctx, r.AWSClient, &data, "delete")
-	if err != nil {
-		response.Diagnostics.AddError("Error sending message to SNS topic.", err.Error())
-		return
+	if !data.CreateOnly.ValueBool() {
+		err := publishMessage(ctx, r.AWSClient, &data, "delete")
+		if err != nil {
+			response.Diagnostics.AddError("Error sending message to SNS topic.", err.Error())
+			return
+		}
 	}
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
