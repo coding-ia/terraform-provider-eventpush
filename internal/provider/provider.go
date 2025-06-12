@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -32,6 +33,7 @@ type AWSConfigOptions struct {
 }
 
 type AWSClient struct {
+	SNSClient *sns.Client
 	SQSClient *sqs.Client
 	KMSClient *kms.Client
 	Region    string
@@ -90,6 +92,7 @@ func (e *EventPushProvider) DataSources(ctx context.Context) []func() datasource
 func (e *EventPushProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		newAWSSQSSendMessageResource,
+		newAWSSNSPublishMessageResource,
 	}
 }
 

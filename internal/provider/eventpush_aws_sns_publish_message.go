@@ -2,14 +2,12 @@ package provider
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -21,34 +19,27 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ resource.Resource = &AWSSQSSendMessageResource{}
-var _ resource.ResourceWithConfigure = &AWSSQSSendMessageResource{}
+var _ resource.Resource = &AWSSNSPublishMessageResource{}
+var _ resource.ResourceWithConfigure = &AWSSNSPublishMessageResource{}
 
-type AWSSQSSendMessageResource struct {
+type AWSSNSPublishMessageResource struct {
 	AWSClient *AWSClient
 }
 
-type AWSSQSSendMessageResourceModel struct {
+type AWSSNSPublishMessageResourceModel struct {
 	CreateOnly       types.Bool                   `tfsdk:"create_only"`
-	DelaySeconds     types.Int32                  `tfsdk:"delay_seconds"`
 	EventId          types.String                 `tfsdk:"event_id"`
 	KMSSignature     []KMSSignatureAttributeModel `tfsdk:"kms_signature"`
 	MD5OfMessageBody types.String                 `tfsdk:"md5_of_message_body"`
 	MessageBody      types.String                 `tfsdk:"message_body"`
-	QueueUrl         types.String                 `tfsdk:"queue_url"`
+	TopicARN         types.String                 `tfsdk:"topic_arn"`
 }
 
-type KMSSignatureAttributeModel struct {
-	KMSKeyID         types.String `tfsdk:"kms_key_id"`
-	MessageAttribute types.String `tfsdk:"message_attribute"`
-	Algorithm        types.String `tfsdk:"algorithm"`
+func newAWSSNSPublishMessageResource() resource.Resource {
+	return &AWSSNSPublishMessageResource{}
 }
 
-func newAWSSQSSendMessageResource() resource.Resource {
-	return &AWSSQSSendMessageResource{}
-}
-
-func (r *AWSSQSSendMessageResource) Configure(ctx context.Context, request resource.ConfigureRequest, response *resource.ConfigureResponse) {
+func (r *AWSSNSPublishMessageResource) Configure(ctx context.Context, request resource.ConfigureRequest, response *resource.ConfigureResponse) {
 	if request.ProviderData == nil {
 		return
 	}
@@ -65,30 +56,26 @@ func (r *AWSSQSSendMessageResource) Configure(ctx context.Context, request resou
 		cfg.Region = providerMeta.AWSConfigOptions.Region
 	}
 
-	sqsClient := sqs.NewFromConfig(cfg)
+	snsClient := sns.NewFromConfig(cfg)
 	kmsClient := kms.NewFromConfig(cfg)
 
 	r.AWSClient = &AWSClient{
-		SQSClient: sqsClient,
+		SNSClient: snsClient,
 		KMSClient: kmsClient,
 		Region:    providerMeta.AWSConfigOptions.Region,
 	}
 }
 
-func (r *AWSSQSSendMessageResource) Metadata(ctx context.Context, request resource.MetadataRequest, response *resource.MetadataResponse) {
-	response.TypeName = request.ProviderTypeName + "_aws_sqs_send_message"
+func (r *AWSSNSPublishMessageResource) Metadata(ctx context.Context, request resource.MetadataRequest, response *resource.MetadataResponse) {
+	response.TypeName = request.ProviderTypeName + "_aws_sns_publish_message"
 }
 
-func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource.SchemaRequest, response *resource.SchemaResponse) {
+func (r *AWSSNSPublishMessageResource) Schema(ctx context.Context, request resource.SchemaRequest, response *resource.SchemaResponse) {
 	response.Schema = schema.Schema{
-		MarkdownDescription: "Send a message to an AWS SQS Queue.",
+		MarkdownDescription: "Send a message to an AWS SNS Topic.",
 		Attributes: map[string]schema.Attribute{
 			"create_only": schema.BoolAttribute{
 				Description: "When enabled, forces resource to be replaced on update.",
-				Optional:    true,
-			},
-			"delay_seconds": schema.Int32Attribute{
-				Description: "The length of time, in seconds, for which to delay a specific message.",
 				Optional:    true,
 			},
 			"event_id": schema.StringAttribute{
@@ -106,11 +93,11 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 				Description: "The message to send.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIf(replaceSQSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
+					stringplanmodifier.RequiresReplaceIf(replaceSNSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
 				},
 			},
-			"queue_url": schema.StringAttribute{
-				Description: "The URL of the Amazon SQS queue which a message is sent.",
+			"topic_arn": schema.StringAttribute{
+				Description: "The topic you want to publish to.",
 				Required:    true,
 			},
 		},
@@ -147,8 +134,8 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 	}
 }
 
-func (r *AWSSQSSendMessageResource) Create(ctx context.Context, request resource.CreateRequest, response *resource.CreateResponse) {
-	var data AWSSQSSendMessageResourceModel
+func (r *AWSSNSPublishMessageResource) Create(ctx context.Context, request resource.CreateRequest, response *resource.CreateResponse) {
+	var data AWSSNSPublishMessageResourceModel
 
 	response.Diagnostics.Append(request.Plan.Get(ctx, &data)...)
 
@@ -156,20 +143,20 @@ func (r *AWSSQSSendMessageResource) Create(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.AWSClient, &data, "create")
+	err := publishMessage(ctx, r.AWSClient, &data, "create")
 	if err != nil {
-		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+		response.Diagnostics.AddError("Error sending message to SNS topic.", err.Error())
 		return
 	}
 
-	// Set event ID only in creation lifecycle
 	data.EventId = types.StringValue(uuid.New().String())
+	data.MD5OfMessageBody = types.StringValue(createMD5OfMessageBody(data.MessageBody.ValueString()))
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
 
-func (r *AWSSQSSendMessageResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
-	var data AWSSQSSendMessageResourceModel
+func (r *AWSSNSPublishMessageResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
+	var data AWSSNSPublishMessageResourceModel
 
 	response.Diagnostics.Append(request.State.Get(ctx, &data)...)
 
@@ -180,8 +167,8 @@ func (r *AWSSQSSendMessageResource) Read(ctx context.Context, request resource.R
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
 }
 
-func (r *AWSSQSSendMessageResource) Update(ctx context.Context, request resource.UpdateRequest, response *resource.UpdateResponse) {
-	var plan, state AWSSQSSendMessageResourceModel
+func (r *AWSSNSPublishMessageResource) Update(ctx context.Context, request resource.UpdateRequest, response *resource.UpdateResponse) {
+	var plan, state AWSSNSPublishMessageResourceModel
 
 	response.Diagnostics.Append(request.Plan.Get(ctx, &plan)...)
 	response.Diagnostics.Append(request.State.Get(ctx, &state)...)
@@ -194,20 +181,19 @@ func (r *AWSSQSSendMessageResource) Update(ctx context.Context, request resource
 	stateMessageBodyMD5 := createMD5OfMessageBody(state.MessageBody.ValueString())
 
 	if planMessageBodyMD5 != stateMessageBodyMD5 {
-		err := sendMessage(ctx, r.AWSClient, &plan, "update")
+		err := publishMessage(ctx, r.AWSClient, &plan, "update")
 		if err != nil {
-			response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+			response.Diagnostics.AddError("Error sending message to SNS topic.", err.Error())
 			return
 		}
-	} else {
-		plan.MD5OfMessageBody = types.StringValue(planMessageBodyMD5)
 	}
+	plan.MD5OfMessageBody = types.StringValue(planMessageBodyMD5)
 
 	response.Diagnostics.Append(response.State.Set(ctx, &plan)...)
 }
 
-func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
-	var data AWSSQSSendMessageResourceModel
+func (r *AWSSNSPublishMessageResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
+	var data AWSSNSPublishMessageResourceModel
 
 	response.Diagnostics.Append(request.State.Get(ctx, &data)...)
 
@@ -215,24 +201,21 @@ func (r *AWSSQSSendMessageResource) Delete(ctx context.Context, request resource
 		return
 	}
 
-	err := sendMessage(ctx, r.AWSClient, &data, "delete")
+	err := publishMessage(ctx, r.AWSClient, &data, "delete")
 	if err != nil {
-		response.Diagnostics.AddError("Error sending message to SQS queue.", err.Error())
+		response.Diagnostics.AddError("Error sending message to SNS topic.", err.Error())
 		return
 	}
 
 	response.Diagnostics.Append(response.State.Set(ctx, &data)...)
+
 }
 
-func sendMessage(ctx context.Context, meta *AWSClient, data *AWSSQSSendMessageResourceModel, lifeCycle string) error {
-	messageAttributes := make(map[string]sqstypes.MessageAttributeValue)
-	input := &sqs.SendMessageInput{
-		QueueUrl:    aws.String(data.QueueUrl.ValueString()),
-		MessageBody: aws.String(data.MessageBody.ValueString()),
-	}
-
-	if !data.DelaySeconds.IsNull() {
-		input.DelaySeconds = data.DelaySeconds.ValueInt32()
+func publishMessage(ctx context.Context, meta *AWSClient, data *AWSSNSPublishMessageResourceModel, lifeCycle string) error {
+	messageAttributes := make(map[string]snstypes.MessageAttributeValue)
+	input := &sns.PublishInput{
+		TopicArn: aws.String(data.TopicARN.ValueString()),
+		Message:  aws.String(data.MessageBody.ValueString()),
 	}
 
 	if data.KMSSignature != nil {
@@ -253,37 +236,24 @@ func sendMessage(ctx context.Context, meta *AWSClient, data *AWSSQSSendMessageRe
 			return err
 		}
 
-		messageAttributes[attrName] = sqstypes.MessageAttributeValue{
+		messageAttributes[attrName] = snstypes.MessageAttributeValue{
 			DataType:    aws.String("String"),
 			StringValue: aws.String(signature),
 		}
 	}
 
-	messageAttributes["X-LifeCycle-Hook"] = sqstypes.MessageAttributeValue{
+	messageAttributes["X-LifeCycle-Hook"] = snstypes.MessageAttributeValue{
 		DataType:    aws.String("String"),
 		StringValue: aws.String(lifeCycle),
 	}
 
 	input.MessageAttributes = messageAttributes
-	output, err := meta.SQSClient.SendMessage(ctx, input)
-
-	if err != nil {
-		return err
-	}
-
-	data.MD5OfMessageBody = types.StringPointerValue(output.MD5OfMessageBody)
-
-	return nil
+	_, err := meta.SNSClient.Publish(ctx, input)
+	return err
 }
 
-func createMD5OfMessageBody(input string) string {
-	hash := md5.Sum([]byte(input))
-	hashString := hex.EncodeToString(hash[:])
-	return hashString
-}
-
-func replaceSQSIfCreateOnlySet(ctx context.Context, request planmodifier.StringRequest, response *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-	var data AWSSQSSendMessageResourceModel
+func replaceSNSIfCreateOnlySet(ctx context.Context, request planmodifier.StringRequest, response *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	var data AWSSNSPublishMessageResourceModel
 
 	response.Diagnostics.Append(request.Plan.Get(ctx, &data)...)
 
