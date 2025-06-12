@@ -10,6 +10,10 @@ func TestAccEventPushSNSPublishMessage_Simple(t *testing.T) {
 resource "eventpush_aws_sns_publish_message" "test" {
   message_body = "test message 1"
   topic_arn    = "arn:aws:sns:us-east-2:242306084486:TestTopic"
+
+  kms_signature {
+    kms_key_id = "arn:aws:kms:us-east-2:242306084486:key/9834cc70-67b2-446b-b921-34feb2c33406"
+  }
 }
 `
 
@@ -17,6 +21,10 @@ resource "eventpush_aws_sns_publish_message" "test" {
 resource "eventpush_aws_sns_publish_message" "test" {
   message_body = "test message 2"
   topic_arn    = "arn:aws:sns:us-east-2:242306084486:TestTopic"
+
+  kms_signature {
+    kms_key_id = "arn:aws:kms:us-east-2:242306084486:key/9834cc70-67b2-446b-b921-34feb2c33406"
+  }
 }
 `
 	resource.Test(t, resource.TestCase{
