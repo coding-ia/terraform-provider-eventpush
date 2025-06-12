@@ -106,7 +106,7 @@ func (r *AWSSQSSendMessageResource) Schema(ctx context.Context, request resource
 				Description: "The message to send.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIf(replaceSQSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
+					stringplanmodifier.RequiresReplaceIf(replaceIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
 				},
 			},
 			"queue_url": schema.StringAttribute{
@@ -280,20 +280,4 @@ func createMD5OfMessageBody(input string) string {
 	hash := md5.Sum([]byte(input))
 	hashString := hex.EncodeToString(hash[:])
 	return hashString
-}
-
-func replaceSQSIfCreateOnlySet(ctx context.Context, request planmodifier.StringRequest, response *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-	var data AWSSQSSendMessageResourceModel
-
-	response.Diagnostics.Append(request.Plan.Get(ctx, &data)...)
-
-	if response.Diagnostics.HasError() {
-		return
-	}
-
-	if !data.CreateOnly.IsNull() {
-		if data.CreateOnly.ValueBool() {
-			response.RequiresReplace = true
-		}
-	}
 }

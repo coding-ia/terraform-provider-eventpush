@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -93,7 +94,7 @@ func (r *AWSSNSPublishMessageResource) Schema(ctx context.Context, request resou
 				Description: "The message to send.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIf(replaceSNSIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
+					stringplanmodifier.RequiresReplaceIf(replaceIfCreateOnlySet, "Forces replacement of resource.", "Forces replacement of resource."),
 				},
 			},
 			"topic_arn": schema.StringAttribute{
@@ -252,17 +253,17 @@ func publishMessage(ctx context.Context, meta *AWSClient, data *AWSSNSPublishMes
 	return err
 }
 
-func replaceSNSIfCreateOnlySet(ctx context.Context, request planmodifier.StringRequest, response *stringplanmodifier.RequiresReplaceIfFuncResponse) {
-	var data AWSSNSPublishMessageResourceModel
+func replaceIfCreateOnlySet(ctx context.Context, request planmodifier.StringRequest, response *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	var createOnly types.Bool
 
-	response.Diagnostics.Append(request.Plan.Get(ctx, &data)...)
+	response.Diagnostics.Append(request.State.GetAttribute(ctx, path.Root("create_only"), &createOnly)...)
 
 	if response.Diagnostics.HasError() {
 		return
 	}
 
-	if !data.CreateOnly.IsNull() {
-		if data.CreateOnly.ValueBool() {
+	if !createOnly.IsNull() {
+		if createOnly.ValueBool() {
 			response.RequiresReplace = true
 		}
 	}
