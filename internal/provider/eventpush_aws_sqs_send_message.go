@@ -261,7 +261,7 @@ func sendMessage(ctx context.Context, meta *AWSClient, data *AWSSQSSendMessageRe
 		}
 	}
 
-	messageAttributes["X-LifeCycle-Hook"] = sqstypes.MessageAttributeValue{
+	messageAttributes["X-LifeCycle-Event"] = sqstypes.MessageAttributeValue{
 		DataType:    aws.String("String"),
 		StringValue: aws.String(lifeCycle),
 	}

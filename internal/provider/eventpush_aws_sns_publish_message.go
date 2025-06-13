@@ -245,7 +245,7 @@ func publishMessage(ctx context.Context, meta *AWSClient, data *AWSSNSPublishMes
 		}
 	}
 
-	messageAttributes["X-LifeCycle-Hook"] = snstypes.MessageAttributeValue{
+	messageAttributes["X-LifeCycle-Event"] = snstypes.MessageAttributeValue{
 		DataType:    aws.String("String"),
 		StringValue: aws.String(lifeCycle),
 	}
